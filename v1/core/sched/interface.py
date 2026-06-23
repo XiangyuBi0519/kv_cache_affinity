@@ -5,7 +5,7 @@ from vllm.v1.core.sched.interface import SchedulerInterface
 class KvCacheSchedulerInterface:
     @abstractmethod
     def release_kv_cache(
-        self, session_id: str, before_token_ids: list[int], released_token_index: int
+        self, session_id: str, block_hashes: list
     ) -> int:
         raise NotImplementedError
 

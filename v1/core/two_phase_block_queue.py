@@ -236,6 +236,8 @@ class TwoPhaseBlockQueue:
     def aging_block(self, block: KVCacheBlock) -> int:
         if block.ref_cnt != 0:
             return 0
+        if block.prev_free_block is None and block.next_free_block is None:
+            return 0
         if self.num_free_blocks <= 1:
             return 1
         if self.aging is None:
