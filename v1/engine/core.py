@@ -40,13 +40,22 @@ class KvCacheEngineCore(EngineCore):
         self, session_id: str, token_requests: list[tuple[Sequence[bytestr], int]]
     ) -> int:
         released_blocks = 0
-        for params, release_index in token_requests:
+        for params, release_start_index in token_requests:
             request = decode_engine_core_request(params)
             logger.debug("request decode %s", request)
             req = Request.from_engine_core_request(request, self.request_block_hasher)
+
+            # 空 prompt 时无 token/无 block，无从换算，直接跳过（防止下方除零）。
+            if len(req.all_token_ids) == 0:
+                continue
+
+            # 把 token 偏移换算成 block 下标：本质是 release_start_index / block_size
+            #（用 block数/token数 的比例表达，因为这里只有 block 数和 token 数、没有 block_size）。
+            # -1：保守往前退一个 block，确保释放点所在的“跨界块”也被释放（release 是软化老化，多释放无害）。
+            # max(0, ...)：防止结果为负导致切片取到错误区间。
             release_block_index = max(
                 0,
-                (release_index * len(req.block_hashes)) // len(req.all_token_ids) - 1,
+                (release_start_index * len(req.block_hashes)) // len(req.all_token_ids) - 1,
             )
             released_blocks += self.scheduler.release_kv_cache(
                 session_id, req.block_hashes[release_block_index:]
