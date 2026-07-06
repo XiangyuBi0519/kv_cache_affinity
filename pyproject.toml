@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kv-cache-affinity"
+version = "0.1.0"
+description = "vLLM plugin: session-aware KV cache affinity + active release (three-phase)"
+requires-python = ">=3.10"
+dependencies = [
+    "vllm>=0.18.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+]
+
+# vLLM 启动时通过该 entry point 发现并加载插件（调用 plugin.register）。
+# 注意：import 名必须是 kv_cache_affinity（代码里绝对导入写死了）。
+[project.entry-points."vllm.general_plugins"]
+kv_cache_affinity = "kv_cache_affinity.plugin:register"
+
+# —— 扁平布局：仓库根目录的内容 == kv_cache_affinity 包 ——
+# 参考项目是“嵌套布局”（有子目录），可用 packages.find；
+# 我们是“扁平布局”（根即包），必须用 package-dir 把包映射到当前目录、
+# 并显式列出子包，否则 find 会把 v1/engine/entrypoints 误当成独立顶级包。
+[tool.setuptools]
+packages = [
+    "kv_cache_affinity",
+    "kv_cache_affinity.engine",
+    "kv_cache_affinity.entrypoints",
+    "kv_cache_affinity.entrypoints.openai",
+    "kv_cache_affinity.v1",
+    "kv_cache_affinity.v1.core",
+    "kv_cache_affinity.v1.core.sched",
+    "kv_cache_affinity.v1.engine",
+]
+
+[tool.setuptools.package-dir]
+kv_cache_affinity = "."
