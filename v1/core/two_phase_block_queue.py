@@ -5,7 +5,12 @@ logger = init_logger(__name__)
 
 
 class TwoPhaseBlockQueue:
-    """This class organizes a list of KVCacheBlock objects to a doubly linked
+    """vanilla FreeKVCacheBlockQueue 的扩展版：在原双向 free 链表基础上新增一个
+    ``aging`` 游标，实现“软释放/两阶段”——被主动 release 的 block 不删除、而是
+    移到 aging 游标处聚集成“优先淘汰区”，真正缺显存时才从这里优先驱逐。
+    popleft / popleft_n / remove 相比 vanilla 额外维护了 aging 游标（见各处注释）。
+
+    This class organizes a list of KVCacheBlock objects to a doubly linked
     list of free blocks. We implement this class instead of using Python
     builtin deque to support removing a block in the middle of the queue
     in O(1) time. To close the performance gap to the builtin deque which is
@@ -51,7 +56,7 @@ class TwoPhaseBlockQueue:
             blocks[0].prev_free_block = self.fake_free_list_head
             self.fake_free_list_tail.prev_free_block = blocks[-1]
             blocks[-1].next_free_block = self.fake_free_list_tail
-            self.aging = self.fake_free_list_tail.prev_free_block
+            self.aging = self.fake_free_list_tail.prev_free_block  # aging 游标初始指向队尾块
         else:
             # For empty list, simply connect the fake head and tail.
             self.fake_free_list_head.next_free_block = self.fake_free_list_tail
@@ -90,6 +95,7 @@ class TwoPhaseBlockQueue:
         self.fake_free_list_head.next_free_block = first_block.next_free_block
         first_block.next_free_block.prev_free_block = self.fake_free_list_head
 
+        # 插件新增：取走的正好是游标块时，游标失效置 None（下次 aging 会重指队头）。
         if self.aging == first_block:
             self.aging = None
         # Remove the block from the linked list.
@@ -131,6 +137,7 @@ class TwoPhaseBlockQueue:
             last_block.prev_free_block = None
             last_block.next_free_block = None
 
+        # 插件新增：若游标块在上面的循环里被取走（前后指针已被清空），游标失效置 None。
         if self.aging is not None and self.aging.prev_free_block is None and self.aging.next_free_block is None:
             self.aging = None
         if curr_block is not None:
@@ -156,6 +163,7 @@ class TwoPhaseBlockQueue:
         # Link the next block to the previous block.
         block.next_free_block.prev_free_block = block.prev_free_block
 
+        # 插件新增：移除的正好是游标块时，游标回退到它的前驱（若退到假头则置 None）。
         if block == self.aging:
             self.aging = block.prev_free_block
             if self.aging == self.fake_free_list_head:
@@ -234,15 +242,20 @@ class TwoPhaseBlockQueue:
         return ret
 
     def aging_block(self, block: KVCacheBlock) -> int:
-        if block.ref_cnt != 0:
+        """把一个 free block 移到 aging 游标处（进入优先淘汰区），返回是否老化了 1 个。
+
+        注意：这不是删除 block，内容仍在显存，只是调整它在淘汰队列中的位置。
+        """
+        # 边界守卫：
+        if block.ref_cnt != 0:  # 还被请求引用 -> 不动
             return 0
-        if block.prev_free_block is None and block.next_free_block is None:
+        if block.prev_free_block is None and block.next_free_block is None:  # 不在 free 链表 -> 不动
             return 0
-        if self.num_free_blocks <= 1:
+        if self.num_free_blocks <= 1:  # 只有 <=1 个块，无处可移，视为已达成
             return 1
-        if self.aging is None:
+        if self.aging is None:  # 游标失效则重新指向队列头
             self.aging = self.fake_free_list_head.next_free_block
-        if block == self.aging:
+        if block == self.aging:  # 已在游标处，无需移动
             return 1
         # 1. remove block from list
         if block.prev_free_block is not None:

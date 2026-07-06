@@ -4,6 +4,8 @@ _orig_allocate_new_computed_blocks = KVCacheCoordinator.allocate_new_computed_bl
 _orig_allocate_new_blocks = KVCacheCoordinator.allocate_new_blocks
 
 
+# 把 session_id 从 coordinator 转发到每个 single_type_manager——因为真正登记 block
+# 归属发生在下层的 single_type_manager，需要它们也能读到当前 session。
 def _propagate_session_id(coordinator: KVCacheCoordinator, session_id) -> None:
     for m in coordinator.single_type_managers:
         m.set_kv_cache_session_id(session_id)
@@ -14,6 +16,7 @@ def _clear_propagated_session_id(coordinator: KVCacheCoordinator) -> None:
         m.clear_kv_cache_session_id()
 
 
+# 覆盖 vanilla：调原版分配逻辑，外面包一层“传播 session 到下层 + finally 清除”。
 def allocate_new_computed_blocks_kv(
     self,
     request_id: str,
@@ -62,6 +65,7 @@ class KvCacheCoordinatorMixin(KVCacheCoordinator):
     def clear_kv_cache_session_id(self) -> None:
         self.kv_cache_session_id = None
 
+    # 释放路径：扇出到所有 single_type_manager，各自老化并累加老化的 block 数。
     def aging_block(self, session_id, block_hashes) -> int:
         num = 0
         for manager in self.single_type_managers:
