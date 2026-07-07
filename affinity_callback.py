@@ -52,6 +52,8 @@ SESSION_TTL = 7200
 def _get_session_id_from_header(data: dict) -> str | None:
     """Extract x-session-affinity from request metadata headers."""
     headers = data.get("metadata", {}).get("headers", {})
+    if headers.get("x-session-affinity") is None:
+        return headers.get("x-session-id")
     return headers.get("x-session-affinity")
 
 
